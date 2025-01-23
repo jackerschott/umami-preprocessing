@@ -9,6 +9,8 @@ import yaml
 from ftag.hdf5 import H5Reader
 from yamlinclude import YamlIncludeConstructor
 
+from upp.classes.components import Component, Components
+from upp.classes.preprocessing_config import PreprocessingConfig
 from upp.logger import ProgressBar
 from upp.stages.hist import bin_jets
 from upp.stages.interpolation import subdivide_bins, upscale_array_regionally
@@ -33,13 +35,13 @@ def safe_divide(a, b):
 
 
 class Resampling:
-    def __init__(self, config):
-        self.config = config.sampl_cfg
+    def __init__(self, config: PreprocessingConfig):
+        self.config = config.resampling_config
         self.components = config.components
         self.variables = config.variables
         self.batch_size = config.batch_size
         self.jets_name = config.jets_name
-        self.upscale_pdf = config.sampl_cfg.upscale_pdf or 1
+        self.upscale_pdf = config.resampling_config.upscale_pdf or 1
         self.num_bins = self.get_num_bins_from_config()
         self.methods_map = {
             "pdf": self.pdf_select_func,
@@ -108,55 +110,56 @@ class Resampling:
         max_ups = ups_counts.max()
         component._ups_max = max_ups if max_ups > component._ups_max else component._ups_max
 
-    def sample(self, components, stream, progress):
+    def sample(self, components: Components, stream, progress):
         # loop through input file
         for batch in stream:
-            for c in components:
-                if c._complete:
+            for component in components:
+                if component._complete:
                     continue
 
                 # apply selections
-                comp_idx, _ = c.flavour.cuts(batch[self.variables.jets_name])
+                assert component.flavour is not None
+                comp_idx, _ = component.flavour.cuts(batch[self.variables.jets_name])
                 if len(comp_idx) == 0:
                     continue
                 batch_out = select_batch(batch, comp_idx)
 
                 # apply sampling
                 idx = np.arange(len(batch_out[self.variables.jets_name]))
-                if c != self.target and self.select_func:
-                    idx = self.select_func(batch_out[self.variables.jets_name], c)
+                if component != self.target and self.select_func:
+                    idx = self.select_func(batch_out[self.variables.jets_name], component)
                     if len(idx) == 0:
                         continue
                     batch_out = select_batch(batch_out, idx)
 
                 # check for completion
-                if c.writer.num_written + len(idx) >= c.num_jets:
-                    keep = c.num_jets - c.writer.num_written
+                if component.writer.num_written + len(idx) >= component.num_jets:
+                    keep = component.num_jets - component.writer.num_written
                     idx = idx[:keep]
                     for name, array in batch_out.items():
                         batch_out[name] = array[:keep]
-                    c._complete = True
+                    component._complete = True
 
                 # track upsampling stats
-                self.track_upsampling_stats(idx, c)
+                self.track_upsampling_stats(idx, component)
 
                 # write
-                c.writer.write(batch_out)
-                progress.update(c.pbar, advance=len(idx))
-                if c._complete:
-                    c._ups_ratio = c.writer.num_written / c._unique_jets
-                    c.writer.add_attr("upsampling_ratio", c._ups_ratio)
-                    c.writer.add_attr("unique_jets", c._unique_jets)
-                    c.writer.add_attr("dsid", str(c.sample.dsid))
-                    c.writer.close()
+                component.writer.write(batch_out)
+                progress.update(component.pbar, advance=len(idx))
+                if component._complete:
+                    component._ups_ratio = component.writer.num_written / component._unique_jets
+                    component.writer.add_attr("upsampling_ratio", component._ups_ratio)
+                    component.writer.add_attr("unique_jets", component._unique_jets)
+                    component.writer.add_attr("dsid", str(component.sample.dsid))
+                    component.writer.close()
 
             # check for completion
             if all(c._complete for c in components):
                 break
 
-        for c in components:
-            if not c._complete:
-                raise ValueError(f"Ran out of {c} jets after writing {c.writer.num_written:,}")
+        for component in components:
+            if not component._complete:
+                raise ValueError(f"Ran out of {component} jets after writing {component.writer.num_written:,}")
 
     def run_on_region(self, components, region):
         # compute the target pdf

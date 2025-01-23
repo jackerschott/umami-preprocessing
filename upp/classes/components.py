@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 import logging as log
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from ftag import Cuts, Label, Sample
+from ftag import Cuts, Label, Sample, Transform
 from ftag.hdf5 import H5Reader, H5Writer
 from ftag.labels import LabelContainer
 
 from upp.classes.region import Region
+from upp.classes.variable_config import VariableConfig
 from upp.stages.hist import Hist
 from upp.types import Split
 
@@ -43,10 +45,12 @@ class Component:
         )
         log.debug(f"Setup component reader at: {fname}")
 
-    def setup_writer(self, variables, jets_name="jets"):
+    def setup_writer(self, variables: VariableConfig):
         dtypes = self.reader.dtypes(variables.combined())
-        shapes = self.reader.shapes(self.num_jets, variables.keys())
-        self.writer = H5Writer(self.out_path, dtypes, shapes, jets_name=jets_name)
+        shapes = self.reader.shapes(self.num_jets, list(variables.keys()))
+        self.writer = H5Writer(
+            self.out_path, dtypes, shapes, jets_name=variables.jets_name
+        )
         log.debug(f"Setup component writer at: {self.out_path}")
 
     @property
@@ -122,6 +126,25 @@ class Component:
     @property
     def unique_jets(self) -> int:
         return sum([r.get_attr("unique_jets") for r in self.reader.readers])
+
+    def write(self, batch: dict[str, np.ndarray]) -> None:
+        assert self.writer.num_written <= self.num_jets
+
+        jet_count_after_write = (
+            self.writer.num_written + len(batch[self.writer.jets_name])
+        )
+        if jet_count_after_write < self.num_jets:
+            self.writer.write(batch)
+        elif jet_count_after_write == self.num_jets:
+            self.writer.write(batch)
+        elif jet_count_after_write > self.num_jets:
+            truncated_jet_count = self.num_jets - self.writer.num_written
+            self.writer.write({
+                name: variable_values[:truncated_jet_count]
+                for name, variable_values in batch.items()
+            })
+        else:
+            raise AssertionError()
 
 
 class Components:
@@ -274,11 +297,26 @@ class Components:
     def dsids(self):
         return list(set(sum([c.sample.dsid for c in self], [])))  # noqa: RUF017
 
-    def groupby_region(self) -> list[tuple[Region, Components]]:
-        return [(r, Components([c for c in self if c.region == r])) for r in self.regions]
+    @property
+    def equal_jets(self) -> bool:
+        equal_jet_flags = [component.equal_jets for component in self]
+        if len(set(equal_jet_flags)) != 1:
+            raise ValueError(
+                "expected equal_jets to only be accessed for components"
+                "belonging to a single sample in which case the values are expected to"
+                f"all be equal, found {equal_jet_flags} however"
+            )
+        return equal_jet_flags[0]
 
-    def groupby_sample(self):
-        return [(s, Components([c for c in self if c.sample == s])) for s in self.samples]
+    def groupby_region(self) -> list[tuple[Region, Components]]:
+        return [
+            (r, Components([c for c in self if c.region == r])) for r in self.regions
+        ]
+
+    def groupby_sample(self) -> list[tuple[Sample, Components]]:
+        return [
+            (s, Components([c for c in self if c.sample == s])) for s in self.samples
+        ]
 
     def __iter__(self):
         yield from self.components
@@ -296,3 +334,14 @@ class Components:
 
     def __len__(self):
         return len(self.components)
+
+    def setup_writers(self, variables: VariableConfig):
+        for component in self:
+            component.setup_writer(variables)
+
+    def write(self, batch: dict[str, np.ndarray]):
+        assert not all(component.write_is_complete for component in self)
+
+        for component in self:
+            if not component.write_is_complete:
+                component.write(batch)

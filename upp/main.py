@@ -18,6 +18,7 @@ from ftag.cli_utils import HelpFormatter, valid_path
 
 from upp.classes.preprocessing_config import PreprocessingConfig
 from upp.logger import setup_logger
+from upp.stages.decompose import decompose
 from upp.stages.hist import create_histograms
 from upp.stages.merging import Merging
 from upp.stages.normalisation import Normalisation
@@ -31,8 +32,6 @@ def parse_args(args):
     parser.add_argument("--config", required=True, type=valid_path, help="Path to config file")
     parser.add_argument("--prep", action=_st, default=None, help="Estimate and write PDFs")
     parser.add_argument("--no-prep", dest="prep", action="store_false")
-    parser.add_argument("--resample", action=_st, default=None, help="Run resampling")
-    parser.add_argument("--no-resample", dest="resample", action="store_false")
     parser.add_argument("--merge", action=_st, default=None, help="Run merging")
     parser.add_argument("--no-merge", dest="merge", action="store_false")
     parser.add_argument("--norm", action=_st, default=None, help="Compute normalisations")
@@ -68,9 +67,16 @@ def run_pp(args) -> None:
         create_histograms(config)
 
     # run the resampling
-    if args.resample:
-        resampling = Resampling(config)
-        resampling.run()
+    decompose(
+        config.components,
+        config.variables,
+        config.batch_size,
+        config.jets_name,
+        config.transform
+    )
+
+    resampling = Resampling(config)
+    resampling.run()
 
     # run the merging
     if args.merge:

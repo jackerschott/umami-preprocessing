@@ -68,13 +68,13 @@ def upscale_array(
 
 
 def upscale_array_regionally(
-    array: np.array,
+    array: np.ndarray,
     upscl: int,
     num_bins: list,
     order: int = 3,
     mode: str = "nearest",
     positive: bool = True,
-) -> np.array:
+) -> np.ndarray:
     """Upscales an array by a factor of upscl separately in each region of the array.
 
     Parameters

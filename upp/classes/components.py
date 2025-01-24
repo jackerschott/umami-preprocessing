@@ -4,6 +4,7 @@ from collections.abc import Iterator
 import logging as log
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from ftag import Cuts, Label, Sample, Transform
@@ -18,6 +19,8 @@ from upp.types import Split
 
 @dataclass
 class Component:
+    JETS_NAME = "jets"
+
     region: Region
     sample: Sample
     flavour: Label | None
@@ -26,32 +29,35 @@ class Component:
     num_jets: int
     num_jets_estimate_available: int
     equal_jets: bool
+    sampling_fraction: float | None = None
 
     def __post_init__(self):
         self.hist = Hist(self.dirname.parent.parent / "hists" / f"hist_{self.name}.h5")
 
     def setup_reader(
         self,
+        path: Path | str | list[Path | str],
         batch_size: int,
-        jets_name: str = "jets",
-        fname: Path | str | list[Path | str] | None = None,
+        jets_name: str = JETS_NAME,
         **kwargs,
     ):
-        if fname is None:
-            fname = list(self.sample.path)
-
         self.reader = H5Reader(
-            fname, batch_size, jets_name=jets_name, equal_jets=self.equal_jets, **kwargs
+            path,
+            batch_size,
+            jets_name=jets_name,
+            equal_jets=self.equal_jets,
+            **kwargs
         )
-        log.debug(f"Setup component reader at: {fname}")
+        log.debug(f"Setup component reader at: {path}")
 
-    def setup_writer(self, variables: VariableConfig):
+    def setup_writer(
+        self, path: Path | str, variables: VariableConfig, jets_name: str = JETS_NAME
+    ):
         dtypes = self.reader.dtypes(variables.combined())
         shapes = self.reader.shapes(self.num_jets, list(variables.keys()))
-        self.writer = H5Writer(
-            self.out_path, dtypes, shapes, jets_name=variables.jets_name
-        )
+        self.writer = H5Writer(path, dtypes, shapes, jets_name)
         log.debug(f"Setup component writer at: {self.out_path}")
+
 
     @property
     def name(self):
@@ -59,6 +65,10 @@ class Component:
             return f"{self.region.name}_{self.sample.name}"
         else:
             return f"{self.region.name}_{self.sample.name}_{self.flavour.name}"
+
+    def get_flavour(self) -> Label:
+        assert self.flavour is not None
+        return self.flavour
 
     @property
     def cuts(self):
@@ -83,21 +93,21 @@ class Component:
         return self.reader.load({jn: variables}, num_jets, cuts)[jn]
 
     def check_num_jets(
-        self, num_req, sampling_frac=None, cuts=None, silent=False, raise_error=True
+        self, num_required, sampling_frac=None, cuts=None, silent=False, raise_error=True
     ):
-        # Check if num_jets jets are aviailable after the cuts and sampling fraction
-        num_est = (
+        # Check if num_jets jets are available after the cuts and sampling fraction
+        num_estimated = (
             None if self.num_jets_estimate_available <= 0 else self.num_jets_estimate_available
         )
-        total = self.reader.estimate_available_jets(cuts, num_est)
+        total = self.reader.estimate_available_jets(cuts, num_estimated)
         available = total
         if sampling_frac:
             available = int(total * sampling_frac)
 
         # check with tolerance to avoid failure midway through preprocessing
-        if available < num_req and raise_error:
+        if available < num_required and raise_error:
             raise ValueError(
-                f"{num_req:,} jets requested, but only {total:,} are estimated to be"
+                f"{num_required:,} jets requested, but only {total:,} are estimated to be"
                 f" in {self}. With a sampling fraction of {sampling_frac}, at most"
                 f" {available:,} of these are available. You can either reduce the"
                 " number of requested jets or increase the sampling fraction."
@@ -106,18 +116,25 @@ class Component:
         if not silent:
             log.debug(f"Sampling fraction {sampling_frac}")
             log.info(
-                f"Estimated {available:,} {self} jets available - {num_req:,} requested"
+                f"Estimated {available:,} {self} jets available - {num_required:,} requested"
                 f"({self.reader.num_jets:,} in {self.sample})"
             )
 
-    def get_auto_sampling_frac(self, num_jets, cuts=None, silent=False):
-        num_est = (
-            None if self.num_jets_estimate_available <= 0 else self.num_jets_estimate_available
+    def get_auto_sampling_frac(self):
+        num_estimated = (
+            None if self.num_jets_estimate_available <= 0
+            else self.num_jets_estimate_available
         )
-        total = self.reader.estimate_available_jets(cuts, num_est)
-        auto_sampling_frac = round(1.1 * num_jets / total, 3)  # 1.1 is a tolerance factor
-        if not silent:
-            log.debug(f"optimal sampling fraction {auto_sampling_frac:.3f}")
+
+        # TODO: estimated_available_jets can take None; fix this in ftag and remove the
+        # pyright ignore comment
+        total = self.reader.estimate_available_jets(
+            self.cuts, num_estimated # pyright: ignore
+        )
+
+        # 1.1 is a tolerance factor
+        auto_sampling_frac = round(1.1 * self.num_jets / total, 3) 
+
         return auto_sampling_frac
 
     def __str__(self):
@@ -335,9 +352,13 @@ class Components:
     def __len__(self):
         return len(self.components)
 
-    def setup_writers(self, variables: VariableConfig):
+    def setup_writers(
+        self,
+        variables: VariableConfig,
+        jets_name: str = Component.JETS_NAME
+    ):
         for component in self:
-            component.setup_writer(variables)
+            component.setup_writer(variables, jets_name)
 
     def write(self, batch: dict[str, np.ndarray]):
         assert not all(component.write_is_complete for component in self)

@@ -163,7 +163,7 @@ class Resampling:
 
     def run_on_region(self, components, region):
         # compute the target pdf
-        target = [component for component in components if component.is_target(self.config.target)]
+        target = [component for component in components if component.is_target(self.config.target_flavour_label)]
         assert len(target) == 1, "Should have 1 target component per region"
         self.target = target[0]
 
@@ -214,7 +214,7 @@ class Resampling:
         if self.config.sampling_fraction == "auto" or self.config.sampling_fraction is None:
             log.info("[bold green]Sampling fraction chosen for each component automatically...")
             for c in self.components:
-                if c.is_target(self.config.target):
+                if c.is_target(self.config.target_flavour_label):
                     c.sampling_fraction = 1
                 else:
                     sam_frac = c.get_auto_sampling_frac(c.num_jets, cuts=c.cuts)
@@ -233,7 +233,7 @@ class Resampling:
                     c.sampling_fraction = max(sam_frac, 0.1)
         else:
             for c in self.components:
-                if c.is_target(self.config.target):
+                if c.is_target(self.config.target_flavour_label):
                     c.sampling_fraction = 1
                 else:
                     c.sampling_fraction = self.config.sampling_fraction

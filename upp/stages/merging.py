@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging as log
 from copy import copy
+from pathlib import Path
 
 import numpy as np
 from ftag.hdf5 import H5Writer, join_structured_arrays
@@ -61,11 +62,15 @@ class Merging:
         self.writer.write(merged)
         return len(merged[self.jets_name])
 
-    def write_components(self, sample, components):
+    def write_components(self, sample, components, output_directory_path: Path):
         # setup inputs
         for component in components:
             batch_size = self.batch_size * component.num_jets // components.num_jets + 1
-            component.setup_reader(batch_size, fname=component.out_path, jets_name=self.jets_name)
+            component.setup_reader(
+                batch_size,
+                fname=output_directory_path / f"{component.name}.h5",
+                jets_name=self.jets_name
+            )
             component.stream = component.reader.stream(
                 self.variables.combined(), component.reader.num_jets
             )
@@ -109,7 +114,7 @@ class Merging:
         log.info(f"[bold green]Finished merging {components.num_jets:,} {sample} jets!")
         log.info(f"[bold green]Saved to {fname}")
 
-    def run(self):
+    def run(self, output_directory_path: Path):
         title = " Running Merging "
         log.info(f"[bold green]{title:-^100}")
 
@@ -119,4 +124,4 @@ class Merging:
             components = self.components.groupby_sample()
 
         for sample, comps in components:
-            self.write_components(sample, comps)
+            self.write_components(sample, comps, output_directory_path)

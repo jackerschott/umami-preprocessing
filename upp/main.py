@@ -23,7 +23,7 @@ from upp.stages.hist import create_histograms
 from upp.stages.merging import Merging
 from upp.stages.normalisation import Normalisation
 from upp.stages.plot import plot_initial_resampling_dists, plot_resampled_dists
-from upp.stages.resampling import Resampling
+from upp.stages.resampling import resample
 
 
 def parse_args(args):
@@ -63,10 +63,13 @@ def run_pp(args) -> None:
     config = PreprocessingConfig.from_file(args.config, args.split)
 
     # create virtual datasets and pdf files
-    if args.prep and args.split == "train":
+    # TODO: we might also want to write histograms when we
+    # don't have the bins from the resampling config
+    if args.prep and args.split == "train" and hasattr(config, "resampling_config"):
         create_histograms(config)
 
     # run the resampling
+    # TODO: pass paths explicitly
     decompose(
         config.components,
         config.variables,
@@ -75,16 +78,34 @@ def run_pp(args) -> None:
         config.transform
     )
 
-    resampling = Resampling(config)
-    resampling.run()
+    components_dir = config.components_dir
+    if hasattr(config, "resampling_config"):
+        resample(
+            config.components,
+            config.components_dir,
+            config.resampled_components_dir,
+            config.variables,
+            config.batch_size,
+            config.resampling_config,
+        )
+        components_dir = config.resampled_components_dir
 
     # run the merging
     if args.merge:
+        # TODO: this should be a function; making this a class
+        # has no benefits while providing access to the config
+        # in every method of the class, making it very hard to track
+        # the responsibilities of each function
+        # TODO: the run function has major sideeffects in terms of writing
+        # multiple files/directories to disk, none of which are evident
+        # by the call in main; path's should be passed explicitly
         merging = Merging(config)
-        merging.run()
+        merging.run(components_dir)
 
     # run the normalisation
     if args.norm and args.split == "train":
+        # TODO: this should be a function, see above comment
+        # TODO: path's should be passed explicitly to run, see above comment
         norm = Normalisation(config)
         norm.run()
 

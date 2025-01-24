@@ -94,6 +94,8 @@ class PreprocessingConfig:
     base_dir: Path
     ntuple_dir: Path = Path("ntuples")
     components_dir: Path = Path("components")
+    # TODO: the addition of this should possibly be backwards compatible
+    resampled_components_dir: Path = Path("resampled_components")
     out_dir: Path = Path("output")
     out_fname: Path = Path("pp_output.h5")
     batch_size: int = 100_000
@@ -121,6 +123,7 @@ class PreprocessingConfig:
         if not self.ntuple_dir.exists():
             raise FileNotFoundError(f"Path {self.ntuple_dir} does not exist")
         self.components_dir = self.components_dir / self.split
+        self.resampled_components_dir = self.resampled_components_dir / self.split
         self.out_fname = self.out_dir / path_append(self.out_fname, self.split)
         self.flavour_container = LabelContainer.from_yaml(self.flavour_config)
 

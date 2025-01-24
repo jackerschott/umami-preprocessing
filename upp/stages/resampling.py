@@ -1,6 +1,7 @@
 import logging as log
 from pathlib import Path
 from typing import Literal
+from ftag.hdf5 import H5Reader
 import numpy as np
 import random
 
@@ -53,6 +54,8 @@ def resample(
         component.setup_writer(
             output_directory_path / f"{component.name}",
             variables_to_stream,
+            dtypes,
+            shapes
         )
 
     set_sampling_fractions(
@@ -219,5 +222,3 @@ def apply_batch_mask(batch: dict[str, np.ndarray], mask_indices: np.ndarray):
 
 def safe_divide(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return np.divide(a, b, out=np.zeros_like(a), where=b != 0)
-
-

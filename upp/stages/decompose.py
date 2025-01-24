@@ -1,3 +1,4 @@
+from pathlib import Path
 from ftag import Transform
 from ftag.hdf5 import H5Reader
 
@@ -6,6 +7,7 @@ from upp.classes.variable_config import VariableConfig
 
 def decompose(
     components: Components,
+    output_directory: Path,
     output_variables: VariableConfig,
     batch_size: int,
     input_jets_name: str,
@@ -24,7 +26,14 @@ def decompose(
         )
 
         for region, region_components in sample_components.groupby_region():
-            region_components.setup_writers(output_variables)
+            region_components.setup_writers(
+                output_directory,
+                output_variables,
+                reader.dtypes(output_variables.combined()),
+                lambda component: reader.shapes(
+                    component.num_jets, list(output_variables.keys())
+                )
+            )
 
             # we need the additionally read the variables that we need to apply the cuts
             # TODO: why does the user need to think about this? This should be fixed in

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
 import logging as log
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from collections.abc import Callable
 
 import numpy as np
-from ftag import Cuts, Label, Sample, Transform
+from ftag import Cuts, Label, Sample
 from ftag.hdf5 import H5Reader, H5Writer
 from ftag.labels import LabelContainer
 
@@ -51,7 +50,12 @@ class Component:
         log.debug(f"Setup component reader at: {path}")
 
     def setup_writer(
-        self, path: Path | str, variables: VariableConfig, jets_name: str = JETS_NAME
+        self,
+        path: Path | str,
+        variables: VariableConfig,
+        dtypes: dict[str, np.dtype],
+        shapes: dict[str, tuple[int, ...]],
+        jets_name: str = JETS_NAME
     ):
         dtypes = self.reader.dtypes(variables.combined())
         shapes = self.reader.shapes(self.num_jets, list(variables.keys()))
@@ -162,6 +166,10 @@ class Component:
             })
         else:
             raise AssertionError()
+
+    @property
+    def write_is_complete(self) -> bool:
+        return self.writer.num_written == self.num_jets
 
 
 class Components:
@@ -354,11 +362,20 @@ class Components:
 
     def setup_writers(
         self,
+        directory_path: Path,
         variables: VariableConfig,
-        jets_name: str = Component.JETS_NAME
+        dtypes: dict[str, np.dtype],
+        get_shape: Callable[[Component], dict[str, tuple[int, ...]]],
+        jets_name: str = Component.JETS_NAME,
     ):
         for component in self:
-            component.setup_writer(variables, jets_name)
+            component.setup_writer(
+                directory_path / f"{component.name}.h5",
+                variables,
+                dtypes,
+                get_shape(component),
+                jets_name
+            )
 
     def write(self, batch: dict[str, np.ndarray]):
         assert not all(component.write_is_complete for component in self)

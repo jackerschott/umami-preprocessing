@@ -113,7 +113,7 @@ class Normalisation:
         with open(self.class_fname, "w") as file:
             yaml.dump(class_dict, file, sort_keys=False)
 
-    def run(self):
+    def run(self, ):
         title = " Computing Normalisations "
         log.info(f"[bold green]{title:-^100}")
 
